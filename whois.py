@@ -1,14 +1,29 @@
-import argparse
 from ipaddress import IPv4Address
 from select import select
 import socket
+import re
 
 DEFAULT_WHOIS_PORT = 43
-DEFAULT_WHOIS_PROVIDER = "whois.ripe.net"
 SOCKET_CONNECT_TIMEOUT = 1
-SOCKET_POLLING_PERIOD = 1
+SOCKET_POLLING_PERIOD = 1.25
 
 BUFFER_SIZE = 4 * 1024
+
+IANA_WHOIS = 'whois.iana.org'
+REGISTRARS = ['ripe', 'arin', 'apnic', 'lacnic', 'afrinic']
+WHOIS_SERVERS = dict(
+        [(registrar, 'whois.%s.net' % registrar)
+         for registrar in REGISTRARS])
+
+WHOIS_FIELDS_PATTERNS = {
+    'netname': r'(?:netname|Name):\s*([\w-]+)',
+    'as': r'(?:origin|aut-num|OriginAS):\s*(?:AS)*(\d+)',
+    'country': r'[cC]ountry:\s*(\w+)',
+    'refer': r'refer:\s*([\w\.]*)',
+    'status': r'status:\s*(\w+)'
+}
+
+WHOIS_TRY_COUNT = 3
 
 
 def get_socket_address(address_string):
@@ -26,10 +41,6 @@ def recv_all(sock):
     return result
 
 
-def get_local_machine_ip():
-    return socket.gethostbyname(socket.gethostname())
-
-
 def receive_information(socket_address, target):
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(SOCKET_CONNECT_TIMEOUT)
@@ -40,16 +51,49 @@ def receive_information(socket_address, target):
         result += recv_all(sock).decode('utf-8')
     return result
 
+
 def whois(source, target):
-    source = "whois.arin.net"
-    target = "198.194.0.0"
-    try:
-        socket_address = get_socket_address(source)
-        target = str(IPv4Address(target))
-        print(receive_information(socket_address, target))
-    except Exception:
-        # print("Failed to request info about '%s' from '%s'" % (args.target, args.source))
-        pass
+    for _ in range(WHOIS_TRY_COUNT):
+        try:
+            socket_address = get_socket_address(source)
+            target = str(IPv4Address(target))
+            info = receive_information(socket_address, target)
+            return info
+        except Exception:
+            pass
 
 
-whois('', '')
+def get_right_whois(ip):
+    data = whois(IANA_WHOIS, ip)
+    return get_match(WHOIS_FIELDS_PATTERNS['refer'], data)
+
+
+def get_whois_info(ip, requested_fields):
+    whois_server = get_right_whois(ip)
+    if not whois_server:
+        return
+
+    # print(whois_server)
+    response = whois(whois_server, ip)
+    data = parse_response(response, requested_fields)
+    # print(ip, data['netname'], data['as'], data['country'], sep=', ')
+    return data
+
+
+def parse_response(response, fields):
+    data = {field: get_match(WHOIS_FIELDS_PATTERNS[field], response)
+            for field in fields}
+
+    return data
+
+
+def get_match(pattern, data):
+    mo = re.search(pattern, data)
+    if not mo:
+        return ''
+
+    return mo.group(1)
+
+
+if __name__ == '__main__':
+    get_whois_info('127.123.123.1', ['netname', 'as', 'country'])
