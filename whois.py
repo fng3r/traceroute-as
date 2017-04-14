@@ -47,7 +47,7 @@ def receive_information(socket_address, target):
         sock.connect(socket_address)
         sock.setblocking(0)
         result = recv_all(sock).decode('utf-8')
-        sock.sendall((target + "\r\n").encode('utf-8'))
+        sock.sendall((target + '\r\n').encode('utf-8'))
         result += recv_all(sock).decode('utf-8')
     return result
 
@@ -73,10 +73,8 @@ def get_whois_info(ip, requested_fields):
     if not whois_server:
         return
 
-    # print(whois_server)
     response = whois(whois_server, ip)
     data = parse_response(response, requested_fields)
-    # print(ip, data['netname'], data['as'], data['country'], sep=', ')
     return data
 
 
